@@ -1,0 +1,15 @@
+torchinfo==1.8.0
+torch==2.7.1
+torchvision==0.22.1
+torchaudio==2.7.1
+albumentations==1.4.21
+opencv-python
+tqdm
+matplotlib==3.9.2
+transformers>=4.43.0
+safetensors>=0.4.5
+
+# Notes:
+# - For NVIDIA GPU with CUDA 11.8, prefer installing the CUDA wheels with:
+#   pip install torch==2.7.1+cu118 torchvision==0.22.1+cu118 torchaudio==2.7.1+cu118 --index-url https://download.pytorch.org/whl/cu118
+#   Then install the rest with: pip install -r requirements.txt --no-deps
