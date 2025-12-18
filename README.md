@@ -213,7 +213,37 @@ python train.py --lr 0.0001 --batch 2 --imgsz 896 896 --epochs 16 --scheduler --
 | `VIDEO_TOTAL_DURATION_SECONDS` | `None`                           | **视频总时长(秒)**。设为 `None` 时自动使用数据中的最大时间戳。 |
 | `SPONSOR_CONFIG`               | `{'小红书': ['红书', ...], ...}` | **赞助商匹配规则**。字典 Key 为标准名称，Value 为关键词列表。 **调整策略**： 1. **添加错别字**：根据 OCR 结果日志，将识别错误的词（如 `yuell`）加入对应品牌的列表。 2. **添加简称**：如将 `买理财`、`找平` 加入 `中国平安` 的列表。 3. **避免冲突**：不要使用太短的通用词（如单字“中”），以免误匹配。 |
 
-### 5 快速推理流程
+### 5 视频 TVCalib 推理
+
+本模块利用计算机视觉几何技术，建立摄像机画面与标准足球场平面（Minimap）之间的映射关系。通过 TvCalib 模型提取球场关键点并计算单应性矩阵（Homography），将预先标记好的广告牌世界坐标投影回摄像机图像平面，通过几何相交判定广告牌是否出现在当前直播画面中，从而生成精准的广告曝光时间轴。
+
+#### 场地广告位置标定
+
+使用 `ad_config_builder.py` 脚本定义标准球场尺寸及周边的广告牌分布。该脚本统一使用 **码 (Yards)** 为单位，以球场左上角为坐标原点，生成 JSON 配置文件与可视化预览图，确保逻辑坐标系与渲染坐标系的一致性。
+
+**可调参数表：**
+
+| 参数名 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `FIELD_LENGTH` | float | 114.83 | 球场长度（单位：码），需与 Minimap 渲染尺寸匹配 |
+| `FIELD_WIDTH` | float | 74.37 | 球场宽度（单位：码） |
+| `AD_CONFIGS` | list | [...] | 广告牌列表。包含 `name` (名称), `side` (top/bottom/left/right), `start`/`end` (0.0-1.0 比例位置) |
+
+#### 推理运行
+
+使用 `video_ad_analyzer.py` 脚本对视频进行抽帧分析。核心逻辑采用 World-to-Image 反向投影方案：利用逆单应性矩阵将广告牌的世界坐标投影至图像坐标系，判断投影线段是否与图像矩形框相交。该方法可以避免透视变换中远端/天空区域导致的坐标发散问题。
+
+**可调参数表：**
+
+| 参数名 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `DEBUG_VISUALIZE` | bool | `True` | 是否开启调试模式，输出包含 Minimap 视锥和广告识别红绿线的图片 |
+| `SAMPLE_FPS` | float | 1.0 | 采样率，每秒分析几帧 |
+| `OPTIM_STEPS` | int | 100 | TvCalib 优化迭代步数，数值越低速度越快但精度略降 |
+| `CONFIG_FILE` | str | `'ad_map_config.json'` | 读取的广告配置文件路径（由上一步生成） |
+| `OUTPUT_CSV` | str | `'ad_timeline.csv'` | 最终生成的广告曝光时间轴文件 |
+
+### 6 快速推理流程
 
 - 确保模型与数据文件都存在
   - 必须有的模型文件：`outputs/kaggle_model_896/best_model_iou.pth`
@@ -225,4 +255,8 @@ python train.py --lr 0.0001 --batch 2 --imgsz 896 896 --epochs 16 --scheduler --
   - 运行 `run_paddle_ocr.py`，输出识别结果日志
   - 运行 `analyze_sponsors.py`，输出分析结果
 - 启动 football-minimap-generator 环境
-  - 具体内容还未实现
+  - 生成场地配置（仅需运行一次，或在修改广告分布后运行）
+    - 运行 `ad_config_builder.py`，检查生成的 `ad_map_visualization.png` 确认广告位无误。
+  - 执行视频分析并输出结果
+    - 运行 `video_ad_analyzer.py`。
+    - 查看生成的 `ad_timeline.csv` 获取广告曝光日志，或查看 `debug_output/` 目录下的可视化校验图。
