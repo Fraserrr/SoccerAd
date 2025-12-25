@@ -6,9 +6,9 @@ Dinov3 参考仓库：
 
 ### 1 环境配置
 
-**python 3.10**
-
 #### DINOv3 环境
+
+**python 3.10**
 
 ```bash
 pip install torch==2.7.1+cu118 torchvision==0.22.1+cu118 torchaudio==2.7.1+cu118 --index-url https://download.pytorch.org/whl/cu118
@@ -59,6 +59,30 @@ pip install paddleocr==3.0.0
 pip install protobuf==3.20.2
 pip install shapely scikit-image
 ```
+
+#### TVCallib 环境
+
+参考 huggingface 仓库文档 https://huggingface.co/spaces/ramseyy10/football-minimap-generator
+
+#### SAM3 环境
+
+参考官方仓库 [facebookresearch/sam3](https://github.com/facebookresearch/sam3)
+
+sam3 需要的库版本很新，需要独立于 tvcalib 和 PaddleOCR，可用的配置方法：
+
+```bash
+conda create -n sam3 python=3.12
+conda deactivate
+conda activate sam3
+
+pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+pip install git+https://github.com/facebookresearch/sam3.git
+
+pip install opencv-python pandas tqdm matplotlib
+```
+
+运行时可能还有部分库缺失，根据报错逐个安装即可，其中 windows 系统下是没有 Triton 库的，如果出现报错需要安装：`pip install triton-windows`
 
 ### 2 Dinov3 模型训练
 
@@ -243,7 +267,33 @@ python train.py --lr 0.0001 --batch 2 --imgsz 896 896 --epochs 16 --scheduler --
 | `CONFIG_FILE` | str | `'ad_map_config.json'` | 读取的广告配置文件路径（由上一步生成） |
 | `OUTPUT_CSV` | str | `'ad_timeline.csv'` | 最终生成的广告曝光时间轴文件 |
 
-### 6 快速推理流程
+#### 识别失败镜头的区分与标记
+
+使用 `video_ad_view_validate.py` 脚本，推理完成后根据结果剔除掉识别失败的帧，并且做标记。
+
+由于 TvCalib 在特写镜头、长焦视角或缺乏特征的画面中容易产生错误的定标结果（如将特写误判为全景，或生成“卫星视角”式的平面投影），本工程设计了一套基于标准视角特征的白名单校验机制。对每一帧计算出的单应性矩阵进行多维度的几何合理性检查，只有完全符合标准视角几何特征的帧才会被标记为 `VALID`，否则标记具体拒绝原因，确保广告统计数据的准确性。
+
+**核心校验逻辑：**
+
+- **透视纵深梯度 (Perspective Depth Gradient)**：这是区分正确视角与错误“平面投影”的关键特征。系统强制要求图像上部的像素覆盖的物理纵深必须显著大于下部像素（符合“近大远小”的透视原理），剔除 TvCalib 生成的矩形或平行光柱状错误投影。
+- **物理尺度约束**：图像底边（Near Plane）在球场平面上覆盖的物理宽度小于 110 码的合理范围，过宽判定为高空错误。
+- **姿态锁定**：
+  - **底边水平约束**：图像底边在 Minimap 上的投影必须保持大致水平，防止视角严重倾斜或旋转。
+  - **梯形扩张性**：视锥形态必须满足“近窄远宽”的梯形特征。
+- **摄像机禁区**：反推的摄像机位置必须位于球场边界之外，且摄像机距离需在合理范围内（小于150码）。
+
+**输出：** CSV 日志文件中的 `status` 列会详细记录每一帧的校验结果，便于后续处理，同时 `debug_output` 目录将推理结果可视化，便于分析或调试。
+
+### 6 SAM3 分割广告牌
+
+这部分工程位于 `sam3-ad-banner` 目录下，需要独立环境，参考环境配置部分介绍。
+
+- 运行 `sam3_process.py` ，会对上一步 tvcalib 识别失败的帧图片进行分割
+  - 可视化结果位于 `sam3_results` 目录
+  - 切割出来的广告牌图片位于 `crops` 目录，可用于后续 OCR
+- 用于DEMO：运行 `sam3_video_demo.py`，对示例视频进行推理和可视化（视频推理与图片推理的逻辑不同，环境可能需要补充安装一些包，暂时还没有验证）
+
+### 7 快速推理流程
 
 - 确保模型与数据文件都存在
   - 必须有的模型文件：`outputs/kaggle_model_896/best_model_iou.pth`
@@ -258,5 +308,5 @@ python train.py --lr 0.0001 --batch 2 --imgsz 896 896 --epochs 16 --scheduler --
   - 生成场地配置（仅需运行一次，或在修改广告分布后运行）
     - 运行 `ad_config_builder.py`，检查生成的 `ad_map_visualization.png` 确认广告位无误。
   - 执行视频分析并输出结果
-    - 运行 `video_ad_analyzer.py`。
-    - 查看生成的 `ad_timeline.csv` 获取广告曝光日志，或查看 `debug_output/` 目录下的可视化校验图。
+    - 运行 `video_ad_view_validate.py`。
+    - 查看生成的 `ad_timeline_validate.csv` 获取广告曝光日志，或查看 `debug_output_v2/` 目录下的可视化校验图。
